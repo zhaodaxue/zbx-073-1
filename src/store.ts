@@ -65,6 +65,7 @@ interface AppState {
   drawRound: (id: number) => Promise<void>
   clearError: () => void
   clearCurrentRound: () => void
+  clearMemberClaims: () => void
 }
 
 function mapRound(raw: any): Round {
@@ -222,4 +223,5 @@ export const useStore = create<AppState>((set) => ({
 
   clearError: () => set({ error: null }),
   clearCurrentRound: () => set({ currentRound: null }),
+  clearMemberClaims: () => set({ memberClaims: [] }),
 }))

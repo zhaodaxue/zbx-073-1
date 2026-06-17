@@ -1,98 +1,8 @@
 import { Router, type Request, type Response } from 'express'
-import type { Database } from 'sql.js'
 import { getDb, markDirty } from '../db.js'
+import { queryAll, queryOne, autoCloseAndDraw, type RoundRow, type CategoryRow, type ClaimRow } from '../roundUtils.js'
 
 const router = Router()
-
-interface RoundRow {
-  id: number
-  name: string
-  deadline: string
-  status: string
-  created_at: string
-}
-
-interface CategoryRow {
-  id: number
-  round_id: number
-  name: string
-  stock_limit: number
-}
-
-interface ClaimRow {
-  id: number
-  round_id: number
-  category_name: string
-  member_code: string
-  quantity: number
-  timestamp: string
-  result: string
-}
-
-function queryAll<T>(db: Database, sql: string, params?: any[]): T[] {
-  const stmt = db.prepare(sql)
-  if (params && params.length > 0) {
-    stmt.bind(params)
-  }
-  const rows: T[] = []
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject() as T)
-  }
-  stmt.free()
-  return rows
-}
-
-function queryOne<T>(db: Database, sql: string, params?: any[]): T | null {
-  const stmt = db.prepare(sql)
-  if (params && params.length > 0) {
-    stmt.bind(params)
-  }
-  let row: T | null = null
-  if (stmt.step()) {
-    row = stmt.getAsObject() as T
-  }
-  stmt.free()
-  return row
-}
-
-function autoCloseAndDraw(db: Database, round: RoundRow): RoundRow {
-  let updated = { ...round }
-
-  if (round.status === 'open' && new Date(round.deadline) <= new Date()) {
-    db.run('UPDATE rounds SET status = ? WHERE id = ?', ['closed', round.id])
-    updated.status = 'closed'
-    markDirty()
-  }
-
-  if (updated.status === 'closed') {
-    const categories = queryAll<CategoryRow>(db, 'SELECT * FROM categories WHERE round_id = ?', [round.id])
-    for (const cat of categories) {
-      const claims = queryAll<ClaimRow>(db, 'SELECT * FROM claims WHERE round_id = ? AND category_name = ? ORDER BY timestamp ASC', [round.id, cat.name])
-      const totalClaimed = claims.reduce((sum, c) => sum + c.quantity, 0)
-
-      if (totalClaimed <= cat.stock_limit) {
-        for (const claim of claims) {
-          db.run('UPDATE claims SET result = ? WHERE id = ?', ['won', claim.id])
-        }
-      } else {
-        let usedStock = 0
-        for (const claim of claims) {
-          if (usedStock + claim.quantity <= cat.stock_limit) {
-            db.run('UPDATE claims SET result = ? WHERE id = ?', ['won', claim.id])
-            usedStock += claim.quantity
-          } else {
-            db.run('UPDATE claims SET result = ? WHERE id = ?', ['lost', claim.id])
-          }
-        }
-      }
-    }
-    db.run('UPDATE rounds SET status = ? WHERE id = ?', ['drawn', round.id])
-    updated.status = 'drawn'
-    markDirty()
-  }
-
-  return updated
-}
 
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -224,7 +134,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
 router.post('/:id/draw', async (req: Request, res: Response): Promise<void> => {
   try {
     const db = await getDb()
-    const round = queryOne<RoundRow>(db, 'SELECT * FROM rounds WHERE id = ?', [req.params.id])
+    let round = queryOne<RoundRow>(db, 'SELECT * FROM rounds WHERE id = ?', [req.params.id])
     if (!round) {
       res.status(404).json({ success: false, error: 'Round not found' })
       return
@@ -235,38 +145,17 @@ router.post('/:id/draw', async (req: Request, res: Response): Promise<void> => {
       return
     }
 
-    if (round.status !== 'closed') {
-      res.status(400).json({ success: false, error: 'Round must be closed before drawing' })
-      return
-    }
-
-    const categories = queryAll<CategoryRow>(db, 'SELECT * FROM categories WHERE round_id = ?', [round.id])
-
-    for (const cat of categories) {
-      const claims = queryAll<ClaimRow>(db, 'SELECT * FROM claims WHERE round_id = ? AND category_name = ? ORDER BY timestamp ASC', [round.id, cat.name])
-      const totalClaimed = claims.reduce((sum, c) => sum + c.quantity, 0)
-
-      if (totalClaimed <= cat.stock_limit) {
-        for (const claim of claims) {
-          db.run('UPDATE claims SET result = ? WHERE id = ?', ['won', claim.id])
-        }
-      } else {
-        let usedStock = 0
-        for (const claim of claims) {
-          if (usedStock + claim.quantity <= cat.stock_limit) {
-            db.run('UPDATE claims SET result = ? WHERE id = ?', ['won', claim.id])
-            usedStock += claim.quantity
-          } else {
-            db.run('UPDATE claims SET result = ? WHERE id = ?', ['lost', claim.id])
-          }
-        }
+    if (round.status === 'open') {
+      if (new Date(round.deadline) > new Date()) {
+        res.status(400).json({ success: false, error: 'Round must be closed before drawing' })
+        return
       }
+      round = autoCloseAndDraw(db, round)
+    } else if (round.status === 'closed') {
+      round = autoCloseAndDraw(db, round)
     }
 
-    db.run('UPDATE rounds SET status = ? WHERE id = ?', ['drawn', round.id])
-    markDirty()
-
-    res.json({ success: true, data: { roundId: round.id, status: 'drawn' } })
+    res.json({ success: true, data: { roundId: round.id, status: round.status } })
   } catch (err) {
     console.error('Draw error:', err)
     res.status(500).json({ success: false, error: 'Failed to draw round' })

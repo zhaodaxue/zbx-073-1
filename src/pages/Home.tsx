@@ -21,13 +21,11 @@ export default function Home() {
       return
     }
     setExpandedId(roundId)
-    if (!roundDetails[roundId]) {
-      await fetchRoundDetail(roundId)
-    }
+    await fetchRoundDetail(roundId)
   }
 
   useEffect(() => {
-    if (currentRound && !roundDetails[currentRound.id]) {
+    if (currentRound) {
       setRoundDetails((prev) => ({ ...prev, [currentRound.id]: currentRound }))
     }
   }, [currentRound])

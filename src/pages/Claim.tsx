@@ -33,8 +33,9 @@ export default function Claim() {
     })
 
     if (result) {
+      await fetchRoundDetail(Number(roundId))
+      await fetchMemberClaims(Number(roundId), memberCode.trim())
       setSubmitResult('success')
-      fetchMemberClaims(Number(roundId), memberCode.trim())
     }
   }
 

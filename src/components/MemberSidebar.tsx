@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Search, User, Tag, Hash } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Search, User, Tag, Hash, Loader2 } from 'lucide-react'
 import { useStore } from '@/store'
 import type { Round } from '@/store'
 
@@ -7,14 +7,36 @@ interface MemberSidebarProps {
   rounds: Round[]
 }
 
+type QueryState = 'idle' | 'loading' | 'done'
+
 export default function MemberSidebar({ rounds }: MemberSidebarProps) {
-  const { memberClaims, loadingMemberClaims, fetchMemberClaims } = useStore()
+  const { memberClaims, loadingMemberClaims, fetchMemberClaims, clearMemberClaims } = useStore()
   const [memberCode, setMemberCode] = useState('')
   const [selectedRoundId, setSelectedRoundId] = useState<number | ''>('')
+  const [queryState, setQueryState] = useState<QueryState>('idle')
 
-  const handleSearch = () => {
+  useEffect(() => {
+    clearMemberClaims()
+    setQueryState('idle')
+  }, [clearMemberClaims])
+
+  const handleMemberCodeChange = (value: string) => {
+    setMemberCode(value)
+    setQueryState('idle')
+    clearMemberClaims()
+  }
+
+  const handleRoundChange = (value: number | '') => {
+    setSelectedRoundId(value)
+    setQueryState('idle')
+    clearMemberClaims()
+  }
+
+  const handleSearch = async () => {
     if (!memberCode.trim() || !selectedRoundId) return
-    fetchMemberClaims(Number(selectedRoundId), memberCode.trim())
+    setQueryState('loading')
+    await fetchMemberClaims(Number(selectedRoundId), memberCode.trim())
+    setQueryState('done')
   }
 
   const resultBadge = (result: string) => {
@@ -40,7 +62,7 @@ export default function MemberSidebar({ rounds }: MemberSidebarProps) {
             <input
               type="text"
               value={memberCode}
-              onChange={(e) => setMemberCode(e.target.value)}
+              onChange={(e) => handleMemberCodeChange(e.target.value)}
               placeholder="输入成员代号"
               className="w-full pl-9 pr-3 py-2 border border-sand rounded-xl bg-cream/50 text-bark placeholder:text-bark/30 focus:outline-none focus:ring-2 focus:ring-wood/30 focus:border-wood text-sm"
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -52,7 +74,7 @@ export default function MemberSidebar({ rounds }: MemberSidebarProps) {
           <label className="block text-sm font-medium text-bark/70 mb-1">选择轮次</label>
           <select
             value={selectedRoundId}
-            onChange={(e) => setSelectedRoundId(e.target.value ? Number(e.target.value) : '')}
+            onChange={(e) => handleRoundChange(e.target.value ? Number(e.target.value) : '')}
             className="w-full px-3 py-2 border border-sand rounded-xl bg-cream/50 text-bark focus:outline-none focus:ring-2 focus:ring-wood/30 focus:border-wood text-sm"
           >
             <option value="">选择轮次</option>
@@ -67,12 +89,23 @@ export default function MemberSidebar({ rounds }: MemberSidebarProps) {
           disabled={!memberCode.trim() || !selectedRoundId || loadingMemberClaims}
           className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-wood text-cream rounded-xl font-medium text-sm hover:bg-wood/90 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow transition-all"
         >
-          <Search className="w-4 h-4" />
+          {loadingMemberClaims ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Search className="w-4 h-4" />
+          )}
           {loadingMemberClaims ? '查询中...' : '查询'}
         </button>
       </div>
 
-      {memberClaims.length > 0 && (
+      {queryState === 'loading' && (
+        <div className="mt-6 flex items-center justify-center py-4">
+          <Loader2 className="w-5 h-5 text-wood animate-spin" />
+          <span className="ml-2 text-sm text-bark/60">查询中...</span>
+        </div>
+      )}
+
+      {queryState === 'done' && memberClaims.length > 0 && (
         <div className="mt-5 space-y-2.5">
           <h4 className="text-sm font-medium text-bark/70">查询结果</h4>
           {memberClaims.map((claim) => (
@@ -96,8 +129,8 @@ export default function MemberSidebar({ rounds }: MemberSidebarProps) {
         </div>
       )}
 
-      {memberClaims.length === 0 && selectedRoundId && memberCode && !loadingMemberClaims && (
-        <p className="mt-4 text-center text-sm text-bark/40">暂无申领记录</p>
+      {queryState === 'done' && memberClaims.length === 0 && (
+        <p className="mt-5 text-center text-sm text-bark/40">暂无申领记录</p>
       )}
     </div>
   )
